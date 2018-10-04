@@ -1,0 +1,290 @@
+---
+title: "Credit Card Fraud Detection"
+output: html_document
+---
+##About the data
+
+The datasets contains transactions made by credit cards in September 2013 by european cardholders. This dataset presents transactions that occurred in two days, where we have 492 frauds out of 284,807 transactions. The dataset is highly unbalanced, the positive class (frauds) account for 0.1727% of all transactions.
+
+It contains only numerical input variables which are the result of a Principal Component Analysis(PCA) transformation. Original features and more information about the data is not provided due to confidentiality issues. Features V1, V2, ... V28 are the principal components obtained with PCA, the only features which have not been transformed with PCA are 'Time' and 'Amount'. Feature 'Time' contains the seconds elapsed between each transaction and the first transaction in the dataset. The feature 'Amount' is the transaction Amount. Feature 'Class' is the response variable and it takes value 1 in case of fraud and 0 otherwise.
+
+## Preparing the dataset
+
+```{r}
+#Loading packages...
+
+#Read rectangular data
+library(readr)
+#Harrell miscellaneous-->contains useful functions for data analysis
+library(Hmisc)
+#Graphical display for correlation matrix
+library(corrplot)
+#Data mining with R 
+library(DMwR)
+#Drawing samples
+library(sampling)
+#To fit model paths for logictic regression
+library(glmnet)
+#To visualize, smoothen, and comparing reciever operating characteristic(ROC curves)
+library(pROC)
+#Classification and regression training---> useful in splitting the data set into training and testing partitions
+library(caret)
+#Miscellaneous functions for statistics and probability
+library(e1071)
+```
+
+```{r}
+#Load dataset
+creditcard <- read.csv("creditcard.csv")
+head(creditcard)
+```
+
+```{r}
+#Statistics for all columns
+describe(creditcard)
+```
+
+```{r}
+#Target class distribution
+attach(creditcard)
+table(Class)
+```
+
+```{r}
+#Create a barplot
+barplot(table(Class), main='Frequency of Class',ylim=c(0,300000),yaxt='n',col=c('blue','black'),xlab = 'Class', ylab = 'Count')
+#ylim-->y-axis limits
+#xlim-->x-axis limits
+#yaxt-->to supress the axis, while creating a custom axis
+#xlab,ylab-->labels for axes
+#col-->colours for the bars
+
+#Generate custom axis
+axis(2,c(0,100000,200000,300000),labels = c("0","100K","200K","300K"),las=2)
+#las-->labels are perpendicular(=2)
+text(0.7,270000,'99.83%')
+text(1.9,20000,'0.17%')
+#adding text to a plot
+```
+
+It is the case of an imbalanced classification, which is a supervised learning problem where one class outnumbers other class by a large proportion. This problem is faced more frequently in binary classification problems than multi-level classification problems.
+
+The term imbalanced refer to the disparity encountered in the dependent (response) variable. Therefore, an imbalanced classification problem is one in which the dependent variable has imbalanced proportion of classes. In other words, a data set that exhibits an unequal distribution between its classes is considered to be imbalanced.
+
+The data is totally imbalanced, with no Null in the whole dataset. It is a case of binary classification where the transactions have been marked fraudulent or non-fraudulent. V1 to V28 have been already scaled. In the next step we process Time and Amount. 
+
+##Data Processing
+
+```{r}
+#Time is present in the dataset as seconds, so we convert it into hours, i.e a 24 hour time; if the time is greater than 24 we subtract 24 from the value to convert it into a 24 hour clock
+time1 <- ifelse(creditcard$Time/3600 < 24, creditcard$Time/3600, creditcard$Time/3600-24)
+time2 <- scale(time1)
+amount1 <- scale(creditcard$Amount)
+creditcard$Time <-time2
+creditcard$Amount <- amount1
+```
+
+```{r}
+#Correlation of all variables
+correlation <- cor(creditcard[1:30])
+
+corrplot(correlation, type= 'lower', bg=rgb(0.9176,0.9176,0.949), tl.srt = 45, tl.cex = 0.8, tl.pos = "lt", tl.col = 'black')
+#type-->display full matrix, lower triangular or upper triangular matrix
+#bg-->background color
+#tl.srt-->text label string rotation in degrees
+#tl.cex-->size of text labels 
+#tl.pos-->position of text labels
+#tl.col-->position of text labels
+
+corrplot(correlation,add = TRUE, bg=rgb(0.9176,0.9176,0.949),type = 'upper', tl.pos="n",method = 'number', cl.cex = 0.8, number.cex = 0.8,number.digits = 1)
+#add-->add to the already existing plot, or generate a new one
+#method-->the visualization method of correlation matrix to be used; here it is 'number'
+#number.cex-->size 
+#number.digits-->number of decimal digits to be added into the plot
+```
+
+```{r}
+#split data into training set and test set in the proportion 7:3
+n <- table(Class)
+set.seed(1)
+data_split <- strata(creditcard,stratanames = 'Class',size = c(n[1]*0.7,n[2]*0.7), method = 'srswor', description = TRUE)
+traindata <- creditcard[data_split$ID_unit,]
+testdata <- creditcard[-data_split$ID_unit,]
+m <- table(traindata$Class)
+#creating a table depicting the number of fraudulent and non-fraudulent transactions
+detach(creditcard)
+```
+
+```{r}
+#check train set and test set
+table(traindata$Class)
+table(testdata$Class)
+```
+
+```{r}
+#resample train set with SMOTE
+set.seed(12)
+traindata$Class <- as.factor(traindata$Class)
+resampleddata <- SMOTE(Class ~ ., traindata, perc.over = (floor(m[1]/m[2])-1)*100, perc.under =(floor(m[1]/m[2]))/floor(m[1]/m[2]-1)*100)
+```
+
+```{r}
+#check resampled train set
+table(resampleddata$Class)
+barplot(table(resampleddata$Class),main='Frequency of Class',ylim=c(0,200000),yaxt='n',xlab = 'Class',ylab = 'Count')
+axis(2,c(0,100000,200000),labels=c('0',"100K","200K"),las=2)
+text(0.7,190000,'198832')
+text(1.9,190000,'198832')
+```
+
+##Modeling using Logistic Regression
+
+```{r}
+#create Logistic Regression model with package glmnet
+set.seed(123)
+x <- as.matrix(resampleddata[1:30])
+y <- as.matrix(resampleddata['Class'])
+#as.matrix --> attempts to turn its argument into a matrix.
+lrmodel <- cv.glmnet(x,y,family='binomial',type.measure = 'auc')
+#x --> input matrix
+#y --> response variable
+#family --> response type --> binomial, multinomial
+```
+
+```{r}
+#view the model
+plot(lrmodel,xlab = 'Lambda',xaxt='n',yaxt='n')
+
+#add one or more straight lines through current plot
+abline(h=seq(0.7,1,0.1),v=c(-9,-6.9,-4.6,-2.3),lty="solid",col=rgb(0.9176,0.9176,0.949))
+#h --> sequence of y values for horizontal lines
+#v --> sequence of x values for vertical lines
+#lty --> line type --> solid, blank, dashed, etc.
+#col ---> color
+
+axis(1,c(-9,-6.9,-4.6,-2.3),labels=c("0.0001","0.001","0.01",'0.1'))
+#side --> 1 --> axis drawn below
+
+axis(2,seq(0.7,1,0.1),labels=c("0.7","0.8","0.9",'1.0'),las=2)
+#side --> 2 --> axis drawn on left side
+#las --> 2 --> labels are perpendicular
+```
+The plot shows change of AUC with parameter lambda, and the number on top axis means the number of significant variables. Lambda is a parameter that is present in the objective function for logistic regression using negative binomail log-likelihood. 
+
+```{r}
+#check the optimal lambda
+lrmodel$lambda.min
+
+#check coefficient of each variable when lambda is optimal
+coef(lrmodel,s='lambda.min')
+```
+
+##Evaluating performance of model with training set
+
+```{r}
+#predict class with unresampled train set
+trainx <- as.matrix(traindata[1:30])
+trainy <- as.matrix(traindata['Class'])
+
+pred <- predict(lrmodel, newx = trainx, s = 'lambda.min', type ='response')
+
+pred_vector <- as.vector(as.numeric(pred))
+trainy1 <- as.vector(as.numeric(trainy))
+```
+
+```{r}
+#get ROC(Receiver Operating Characteristic) curve and AUC(area under curve)
+rss <- roc(trainy1,pred_vector,auc = TRUE,smooth=TRUE)
+rss[["auc"]]
+```
+
+In a ROC curve the true positive rate (Sensitivity) is plotted in function of the false positive rate (Specificity) for different cut-off points of a parameter. Each point on the ROC curve represents a sensitivity/specificity pair corresponding to a particular decision threshold. The area under the ROC curve (AUC) is a measure of how well a parameter can distinguish between two diagnostic groups.
+
+```{r}
+plot(rss,xlim=c(1,0),lwd=2,main='ROC Curve',font.main=1,cex.main=1.1,yaxt='n')
+
+abline(h=seq(0,1,0.2), v=seq(0,1,0.2),lty=1,col=rgb(0.9176,0.9176,0.949))
+
+axis(2,seq(0,1,0.2),labels=c("0","0.2","0.4",'0.6','0.8','1.0'),las=2)
+
+text(0.3,0.2,'AUC=0.986')
+```
+
+The model have nearly perfect ROC and AUC which is not a good prediction.
+
+```{r}
+#calculate Recall-Precision
+recall <- c()
+precision <- c()
+thresholdnumber <- c()
+for (i in 1:9)
+    {thresholdnumber[i] <- i/10
+    pred2 <- as.numeric(ifelse(pred_vector > thresholdnumber[i], '1', '0'))
+    cms <- confusionMatrix(pred2,trainy,positive = '1')
+    recall[i] <- cms[["byClass"]][["Recall"]]
+    precision[i] <- cms[["byClass"]][["Precision"]]
+}
+data.frame(thresholdnumber,recall,precision)
+rp <- data.frame(thresholdnumber,recall,precision)
+```
+
+Recall and precision are opposite with the change of threshold. Because of the unbalance of dataset, recall and precision are also unbalanced. So we can see that precision is still small when threshold is 0.9, more recall and precision will be calculated with more threshold.
+
+```{r}
+recall <- c()
+precision <- c()
+thresholdnumber <- c()
+for (i in 1:16)
+    {thresholdnumber[i] <- 1-10^(-i)
+    pred2 <- as.numeric(ifelse(pred_vector > thresholdnumber[i], '1', '0'))
+    cms <- confusionMatrix(pred2,trainy,positive = '1')
+    recall[i] <- cms[["byClass"]][["Recall"]]
+    precision[i] <- cms[["byClass"]][["Precision"]]
+}
+rp[10:25,]  <- data.frame(thresholdnumber,recall,precision)
+rp[26,] <- c(1,0,1)
+plot(rp$recall,rp$precision,type = 'b',pch=20,xlim=c(0,1),ylim=c(0,1),yaxt='n',col='black',xlab='Recall',ylab='Precision',main='PR Curve',font.main=1,cex.main=1.2)
+abline(h=seq(0,1,0.2),v=seq(0,1,0.2),lty=1,col='gray')
+axis(2,seq(0,1,0.2),labels=c("0","0.2","0.4","0.6","0.8","1"),las=2)
+```
+
+Recall and precision are balanced when threshold is 0.99, so we choose 0.99 to calculate the confusion matrix.
+
+```{r}
+#calculate confusion matrix
+pred3 <- as.numeric(ifelse(pred_vector > 0.99, '1', '0'))
+confusionMatrix(pred3,trainy,positive = '1')
+```
+
+The precision is still too small when threshold is 0.99, it means that the model classify too much transactions into class 'fraud'. But it can be accepted in this detection, because the main goal is to detect enough fraud transactions, which is bigger recall.
+
+##Testing model on test set
+
+```{r}
+#predict class on test set
+testx <- as.matrix(testdata[1:30])
+testy <- as.matrix(testdata['Class'])
+testy1 <- as.vector(as.numeric(testy))
+testpred <- predict(lrmodel, newx = testx, s = 'lambda.min', type ='response')
+```
+
+```{r}
+#get ROC curve and AUC
+testpred1 <- as.vector(as.numeric(testpred))
+testrs <- roc(testy1,testpred1,auc = TRUE,smooth=TRUE)
+testrs[["auc"]]
+plot(testrs,xlim=c(1,0),lwd=2,main='ROC Curve',font.main=1,cex.main=1.1,yaxt='n')
+abline(h=seq(0,1,0.2), v=seq(0,1,0.2),lty=1,col=rgb(0.9176,0.9176,0.949))
+axis(2,seq(0,1,0.2),labels=c("0","0.2","0.4",'0.6','0.8','1.0'),las=2)
+text(0.3,0.2,'AUC=0.9733')
+```
+
+```{r}
+#calculate confusion matrix
+testpred2 <- as.numeric(ifelse(testpred1 > 0.99, '1', '0'))
+confusionMatrix(testpred2,testy,positive = '1')
+```
+
+##Conclusion
+We get a relatively accurate model with perfect AUC and proper recall and precision. 
+The criterion for creating model in function glmnet() is chosen as getting biggest AUC, it's not perfectly suitable for unbalanced dataset as is the case here. The best criterion for this detection is biggest AUPRC(Area Under Precision-Recall Curve), but it can't be chosen in function glmnet(). So for further extension of the project we need to create a custom package using glmnet to get the biggest AUPRC.
