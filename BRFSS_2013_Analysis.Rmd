@@ -1,0 +1,162 @@
+---
+title: "Exploring the relational aspect of the BRFSS data"
+output: 
+  html_document: 
+    fig_height: 4
+    highlight: pygments
+    theme: spacelab
+---
+### Load packages
+
+```{r load-packages, message = FALSE}
+library(ggplot2)
+library(dplyr)
+```
+
+### Load data
+
+```{r load-data}
+load("brfss2013.RData")
+```
+
+## Data
+
+The data is the BRFSS (Behavioral Risk Factor Surveillance System) data. The data collects behavioral data and associated health data in order to draw conclusions about how behavior is linked to health outcomes. The data was procurred from various states of the United States. Initially the survey was only conducted in 15 states through monthly telephone interviews. The number of states participating in the survey increased overtime, and now there are 55 states involved. The term "state" is  used to refer to all the areas participating in the BRFSS. We have 53 states which collect the data annually, whereas a few states collect these data over a period of a few months. 
+
+The survey includes a landline telephone survey and cellular telephone survey. The data is collected from a randomly selected adult in a household and hence implies that the household is being selected at random aswell. Hence, we say that to collect the data random sampling is used. Since, most households have either a landline phone or cellphone, this sample should be representative of the population at large and hence generalizable. 
+
+Another point that should be highlighted is that this is a *Prospective Observational Study*. The collection of data is an ongoing process. The data can be used to establish an association or correlation between the various factors. Random assignment was not used since the survey just looks to collect a general set of data to establish correlations. Hence, it does not suggest causation in any way. 
+
+Since it is randomly sampled, assuming that we have eliminated the biases, we can generalise it for the population. Nevertheless, we can have biases which can only be contemplated and not necessarily known. It may be such that the individual does not complete the survey, or the individual would not be completely true with each of the answers because of their own reasons. As these are uncertain factors, we just assume that there are no biases, and that the data can be generalised for the population of United states.
+
+## Research questions
+
+**Research quesion 1:** 
+Does the income level and the number of hours worked of an individual relate to their general health? 
+One could expect a correlation between higher income level and a higher percieved general health. It would be interesting to analyse this relationship. Further, this can be used by the government for better work time regulations for the welfare of the citizens.
+
+**Research quesion 2:** 
+Does the income level of an individual relate to whether the subject exercised in the past 30 days?
+It could be expected that higher income level means a better affordability of a gym membership for an individual, and hence it would be interesting to analyse.
+
+**Research quesion 3:** 
+How does number of hours worked, marital status correlate to risk of heart attack? 
+One would expect a high number of hours worked, and a single/divorced person to be at greater risk of heart attack due to stress. It would interesting to draw inference about an individual's social life and health status. 
+
+## Exploratory data analysis
+
+**Research quesion 1:**
+The first step towards analysing the dataset for this question is to draw the variables of concern, which are- X_state, iyear, and hlthpln1. The variables can be described as follows:
+*X_state*: Gives the state code.
+*iyear*: Interview year.
+*hlthpln1*: If the respondent has any health care coverage.
+
+We start with cleaning the data where we have filtered for the NA values, as well as put a filter for the year of 2013, which is our year of concern based on our question.
+```{r}
+brfss2013 <- filter(brfss2013, !is.na(iyear),!is.na(hlthpln1))
+```
+We select the variables on which we need to work on. Grouping the data based on *X_state* gives us the data for all the states in that particular year. Amongst all the responses we just want to focus on the data where the respondents have a health plan, hence we compare their response from the *hlthpln1* variable for each state.
+```{r}
+brfss2013 <- brfss2013 %>%
+  select(X_state, hlthpln1, iyear) %>%
+  filter(iyear=="2013")
+```
+We can obtain the total number of observations which includes the 'Yes' and 'No' both for each state, it can be summarized as given in the reproducible code below. We store this in a temporary dataframe *tot*. It can be thought of as another stage of filtering our required data.  
+```{r}
+tot <- brfss2013 %>% group_by( X_state) %>% 
+  summarise(total=n())
+```
+Similar as shown above, we also filter on 'Yes' in *hlthpln1* for each state, and then summarize it into a temporary dataframe *yes*. This basically gives us the total number of 'Yes' obtained from the respondents.
+```{r}
+yes <-  filter(brfss2013, as.character(hlthpln1)=="Yes") %>% 
+  group_by(X_state) %>% 
+  summarise(noofyes=n())
+```
+We merge the above two data frames to obtain a new dataframe with a common variable *X_state*. For each state we have now obtained the total number of responses, as well as the total number of 'Yes'. We can use this to draw proportions.
+```{r}
+newbrfss <- merge.data.frame(tot,yes) 
+```
+```{r}
+newbrfss <-  newbrfss %>%
+  group_by(X_state) %>%
+  mutate( populationprop = 100*(noofyes/total))
+```
+We can also generate a histogram for the "number of yes" obtained for our study as given below. The graph hence obtained is not majorly, but rightly skewed. 
+```{r}
+ggplot(newbrfss, aes(x= noofyes)) + geom_histogram()
+```
+
+**Research quesion 2:**
+Based on our question, we need to clean and filter the data for the available values of the year 2013, and all the cases for each state where the income of the respondents is less than $50,000. We work with four variables- *X_state*, *iyear*, *income2*, *bpmeds*.
+```{r}
+load("brfss2013.RData")
+brfss2013 <- filter(brfss2013, !is.na(iyear), !is.na(income2), !is.na(bpmeds))
+```
+```{r}
+brfss2013 <- brfss2013 %>%
+  select(X_state, iyear, income2, bpmeds)%>%
+  filter(iyear=="2013", as.character(income2)=="Less than $50,000")
+```
+As further filtering of the data we create a temporary data frame *tot* which stores the total number of respondents which fall under the above case, corresponding to each state. 
+```{r}
+tot <- brfss2013 %>%
+  group_by( X_state) %>%
+  summarise(total=n())
+```
+Similar to the above step we create a temporary data frame *yes* which stores the total number of respondents who do take the blood pressure medication, corresponding to each state.
+```{r}
+yes <- brfss2013 %>%
+  filter( as.character(bpmeds)=="Yes") %>%
+  group_by(X_state) %>%
+  summarise(takebpmeds = n())
+```
+We see that both of these temporary dataframes created have the data from each of the states, and hence can be used to draw proportions for the sample upon merging the data frames. Hence, a new data frame is created, named *bpmedsinfo*, which merges the earlier to dataframes and gives us a better idea about our question. Using the columns available we can now derive the proportion corresponding to each state.
+```{r}
+bpmedsinfo <- merge.data.frame(tot,yes)
+```
+```{r}
+bpmedsinfo <- bpmedsinfo %>%
+  group_by(X_state) %>%
+  mutate( populationprop = 100*(takebpmeds/total) )
+```
+To further analyse our problem statement we can generate a histogram for the number of people who do take the blood pressure medication. We can also notice a few outliers with a rather high number than compared to the most of the states, it is also right skewked. 
+```{r}
+ggplot(bpmedsinfo, aes(x= takebpmeds)) + geom_histogram()
+```
+
+**Research quesion 3:**
+With this question we can examine the relationship between the sleep time and the blood pressure status of the sample. Our variables of concern are- *X_state*,*iyear*,*sleptim1* and *bphigh4*. We filter the available dataset for the year 2013, and where the sleeptime of the individual is greater than 6 hours daily, we also eliminating the NA values pertaining to these variables.
+```{r}
+load(("brfss2013.RData"))
+brfss2013 <- filter(brfss2013, !is.na(iyear), !is.na(sleptim1), !is.na(bphigh4))
+```
+```{r}
+brfss2013 <- brfss2013 %>% 
+  select(X_state, iyear, sleptim1, bphigh4) %>%
+  filter(iyear=="2013", sleptim1 > 6)
+```
+The total number of observations that occur in the cleaned dataset is recorded in a temporary dataframe with 2 variables- *X_state* and *total*.
+```{r}
+tot <- brfss2013 %>% group_by( X_state) %>%
+  summarise(total=n())
+```
+We also record the total number of observations where the individuals have a complain of blood pressure, this is recorded in a temporary dataframe *bp*. This also has two variables- *X_state* and *havebp*.
+```{r}
+bp<- brfss2013 %>%
+  filter( as.character(bphigh4)=="Yes") %>%
+  group_by(X_state) %>%
+  summarise(havebp = n())
+```
+The above two dataframes are merged into one, so as to get a better picture of the problem. Here we can look at the number of observations where individuals have blood pressure vs. to the total number of observations with sleeptime greater than 6 hours. This can be used to draw implications about the sample with the help of the proportions hence drawn. 
+```{r}
+bpinfo <- merge.data.frame(tot, bp)
+```
+```{r}
+bpinfo <- bpinfo %>%
+  group_by(X_state) %>%
+  mutate( populationprop = 100*(havebp/total))
+```
+We can better speak about the sample data once we draw a histogram which gives us the trend about the total number of people with sleeptime greater than 6 hours and have a complain of blood pressure. We see that the graph is rightly skewed with just a few outliers and more than one peak.
+```{r}
+ggplot(bpinfo, aes(x= havebp)) + geom_histogram()
+```
